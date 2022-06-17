@@ -1,9 +1,10 @@
+using LinearAlgebra
 """ Implements Dynamic Mode Decomposition, kernel DMD, exact DMD,
     and related algorithms given sets of data
 """
 
 
-struct DMD
+mutable struct DMD{FT<:AbstractFloat, IT<:Int, CT<:Complex}
     """ Dynamic Mode Decomposition (DMD)
 
     Dynamically relevant dimensionality reduction using the Proper Orthogonal
@@ -80,25 +81,25 @@ struct DMD
     For total least squares DMD in Hemati & Rowley, exact=True and total=True
 
     """
-    n_rank::Int64
+    n_rank::Int
     exact::Bool
     total::Bool
-    _basis
-    _Ã
-    _w
-    _λ
+    _modes::Union{Array{FT,2}, Nothing}
+    _Ã::Union{Array{FT,2}, Nothing}
+    _w::Union{Array{CT,2}, Nothing}
+    _λ::Union{Array{CT,1}, Nothing}
 end
 
-function DMD(n_rank=0, exact=false, total=false)
+function DMD(;n_rank=0, exact=false, total=false)
 
     # Internal variables
-    _basis = nothing  # spatial basis vectors
+    _modes = nothing  # spatial basis vectors
     _Ã = nothing  # The full DMD matrix
     _w = nothing  # DMD mode coefficients
     _λ = nothing  # DMD eigenvalues
     
 
-    return DMD(n_rank, exact, total, _basis, _Ã, _w, _λ)
+    return DMD{Float64,Int64, ComplexF64}(n_rank, exact, total, _modes, _Ã, _w, _λ)
 end
     
 
@@ -107,15 +108,15 @@ function modes(self::DMD)
 Koopman mode for observable x (identity map)
 w -> λw under the map F
 """
-    return self._basis * self._w
+    return self._modes
 end
 
 function evals(self::DMD)
     return self._λ
 end
-function basis(self::DMD)
-    return self._basis
-end
+# function basis(self::DMD)
+#     return self._basis
+# end
 
 function Atilde(self::DMD)
     return self._Ã
@@ -149,24 +150,24 @@ function fit!(self::DMD, X, Y=nothing)
     end
 
     #  Max rank is either the specified value or determined by matrix size
-    if self.n_rank == 0
+    if self.n_rank > 0
         n_rank = min(self.n_rank, size(X, 1), size(X, 2))
     else
-        n_rank = min(size(X))
+        n_rank = min(size(X,1), size(X,2))
     end
 
     # ====== Total Least Squares DMD: Project onto shared subspace ========
     # project both XY on the joint 
     if self.total
         # Compute V using the method of snapshots
-        U, S, _ = svd(X'*X + Y'*Y, full=false)
+        U, _, _ = svd([X;Y]', full=false)
         
         V_stacked = U[:, 1:n_rank]  # truncate to n_rank
 
         # Compute the "clean" data sets
-        proj_Vh = V_stacked * V_stacked'
-        X = X * proj_Vh
-        Y = Y * proj_Vh
+        X = X * V_stacked * V_stacked'
+        Y = Y * V_stacked * V_stacked'
+
     end
 
     # ===== Dynamic Mode Decomposition Computation ======
@@ -187,31 +188,32 @@ function fit!(self::DMD, X, Y=nothing)
     # Any eigen pair of Ã with the form (λ, w), 
     # then A(YVΣ⁻¹w) = YVΣ⁻¹UᵀYVΣ⁻¹w = YVΣ⁻¹Ãw = YVΣ⁻¹λw = λ(YVΣ⁻¹w)
     # =====
-    U, S, Vᵀ = svd(X, full=false)
-
+    U, S, V = svd(X, full=false) # X = U S Vᵀ
     if self.n_rank > 0
-        U = U[:, 1:n_rank]
-        S = S[1:n_rank]
-        Vᵀ = Vᵀ[1:n_rank, :]
+        U  = U[:, 1:n_rank]
+        S  = S[1:n_rank]
+        V = V[:, 1:n_rank]
     end
 
     # Compute the DMD matrix using the pseudoinverse of X
-    self._Ã = U'*Y*Vᵀ'/S
+    self._Ã = U'*Y*V ./ S'
+
+    
 
     # Eigensolve gives modes and eigenvalues
-    self._λ, self._w = eig(self._Ã)
-
+    self._λ, self._w = eigen(self._Ã)
+    
     # Two options: exact modes or projected modes
     if self.exact
-        self._basis = Y*Vᵀ'/S
+        self._modes = Y*V ./ S'
     else
-        self._basis = U
+        self._modes = U
     end
 
 end
 
 
-struct KDMD
+mutable struct KDMD{FT<:AbstractFloat, IT<:Int, CT<:Complex}
     """ Kernel Dynamic Mode Decomposition (KDMD)
 
     Dynamically relevent dimensionality reduction using kernel-based methods
@@ -291,38 +293,38 @@ struct KDMD
     For kernel DMD as defined in Williams, exact=False and total=False
     """
 
-    kernel_fun::Function
+    kernel_fun
     n_rank::Int
     exact::Bool
     total::Bool
+    _Ã::Union{Array{FT,2}, Nothing}
+    _w::Union{Array{CT,2}, Nothing}
+    _λ::Union{Array{CT,1}, Nothing}
+    _Â::Union{Array{FT,2}, Nothing}
+    _Ĝ::Union{Array{FT,2}, Nothing}
+    _modes::Union{Array{CT,2}, Nothing}
+    _PhiX::Union{Array{CT,2}, Nothing}
 
-    _basis
-    _Ã
-    _w
-    _λ
-
-    self._modes = None
-    self._evals = None
-    self._Phi = None
-    self._Ã = None
-    self._G = None
-    self._A = None
+    r_ϵ::FT
+    
 end
 
-function KDMD(kernel_fun::Function, n_rank=0, exact=false, total=false)
-    
+function KDMD(kernel_fun; n_rank=0, exact=false, total=false, r_ϵ=1e-8)
+    return KDMD{Float64, Int64, ComplexF64}(kernel_fun, n_rank, exact, total, 
+                nothing, nothing, nothing, nothing, nothing,nothing, nothing, r_ϵ)
 end
 
 function modes(self::KDMD)
         return self._modes
+end
 
 function evals(self::KDMD)
     return self._λ
 end
 
-function basis(self::KDMD)
-    return self._basis
-end
+# function basis(self::KDMD)
+#     return self._basis
+# end
 
 function Atilde(self::KDMD)
     return self._Ã
@@ -354,24 +356,19 @@ function fit!(self::KDMD, X, Y=nothing)
     # Ψ(x) = [ψ(x₁)ᵀ; ψ(x₂)ᵀ; ..., ψ(xₙ)ᵀ]
     # Ψ(y) = [ψ(y₁)ᵀ; ψ(y₂)ᵀ; ..., ψ(yₙ)ᵀ]
     # Ψ(x) K = Ψ(y)
-    # G = Ψ(x)ᵀΨ(x)
-    # A = Ψ(x)ᵀΨ(y)
-    # K = G⁻¹ A
-    # Instead of computing G or A (the dimension of feature space is very high), we compute
-    # Ψ(x) = QΣZᵀ
-    # K := ZΣ⁻¹QᵀΨ(y)
-    # μv = Kv, we consider v = Zv̂
-    # μZv̂ = KZv̂ = ZΣ⁻¹QᵀΨ(y)Zv̂ = ZΣ⁻¹QᵀΨ(y)Ψ(x)ᵀQΣ⁻¹v̂
-    # μv̂ = Σ⁻¹QᵀÂQΣ⁻¹v̂ where Â = Ψ(x)Ψ(y)ᵀ   Âᵢⱼ= K(xᵢ,yⱼ) 
-    # Then (μ, v̂) is the eigen pair of K̂ = Σ⁻¹QᵀÂQΣ⁻¹
-
+    # Ĝ = Ψ(x)Ψ(x)ᵀ
+    # Â = Ψ(y)Ψ(x)ᵀ
     if Y === nothing
-        # Efficiently compute Â = ψ(x)ᵀψ(y), Ĝ = ψ(x)ᵀψ(y), and optionally Ĝy = ψ(y)ᵀψ(y)
+        # Efficiently compute Â = ψ(y)ψ(x)ᵀ, Ĝ = ψ(x)ψ(x)ᵀ, and optionally Ĝy = ψ(y)ψ(y)ᵀ
         # given a time series of data
+
+
 
         Ĝfull = inner_product(self.kernel_fun, X, X)
         Ĝ = Ĝfull[1:end-1, 1:end-1]
         Â = Ĝfull[2:end, 1:end-1]
+
+        @info size(X), size(Ĝfull)
 
         if self.total
             Ĝy = Ĝfull[2:end, 2:end]
@@ -379,6 +376,10 @@ function fit!(self::KDMD, X, Y=nothing)
 
         Y = X[:, 2:end]
         X = X[:, 1:end-1]
+
+        @info "size(Â)", size(Â), norm(Â)
+        @info "size(Ĝ)", size(Ĝ), norm(Ĝ)
+        
     else  
         # Paired data
         # ψ(x) = [ψ₁(x); ψ₂(x); ...; ψₖ(x)] 
@@ -392,22 +393,24 @@ function fit!(self::KDMD, X, Y=nothing)
     end
     # Rank is determined either by the specified value or
     # the number of snapshots
-    if self.n_rank == 0
-        n_rank = min(self.n_rank, size(X,1))
+    if self.n_rank > 0
+        n_rank = min(self.n_rank, size(X,2))
     else
-        n_rank = size(X,1)
+        n_rank = size(X,2)
     end
 
     # ====== Total Least Squares DMD: Project onto shared subspace ========
     if self.total
         # Compute V using the method of snapshots
-        U, S, _ = svd(G + Gy)
+        U, S, _ = svd(Ĝ + Ĝy)
+        n_rank = min(n_rank, searchsortedfirst(S, self.r_ϵ*S[1], rev=true)-1)
+
         V_stacked = U[:, 1:n_rank]  # truncate to n_rank
 
         # Compute the "clean" data sets
         proj_Vh = V_stacked * V_stacked'
-        Ĝ = proj_Vh * G * proj_Vh
-        Â = proj_Vh * A * proj_Vh
+        Ĝ = proj_Vh * Ĝ * proj_Vh
+        Â = proj_Vh * Â * proj_Vh
         X = X * proj_Vh
         Y = Y * proj_Vh
     end
@@ -416,36 +419,55 @@ function fit!(self::KDMD, X, Y=nothing)
     # Ψ(x) = [ψ(x₁)ᵀ; ψ(x₂)ᵀ; ..., ψ(xₙ)ᵀ]
     # Ψ(y) = [ψ(y₁)ᵀ; ψ(y₂)ᵀ; ..., ψ(yₙ)ᵀ]
     # Ψ(x) K = Ψ(y)
-    # G = Ψ(x)ᵀΨ(x)
-    # A = Ψ(x)ᵀΨ(y)
+    # Ĝ = Ψ(x)Ψ(x)ᵀ
+    # Â = Ψ(y)Ψ(x)ᵀ
+
     # K = G⁻¹ A
     # Instead of computing G or A (the dimension of feature space is very high), we compute
     # Ψ(x) = QΣZᵀ
-    # K := ZΣ⁻¹QᵀΨ(y)
-    # μv = Kv, we consider v = Zv̂
-    # μZv̂ = KZv̂ = ZΣ⁻¹QᵀΨ(y)Zv̂ = ZΣ⁻¹QᵀΨ(y)Ψ(x)ᵀQΣ⁻¹v̂
-    # μv̂ = Σ⁻¹QᵀÂQΣ⁻¹v̂ where Â = Ψ(x)Ψ(y)ᵀ   Âᵢⱼ= K(xᵢ,yⱼ) 
-    # Then (μ, v̂) is the eigen pair of K̂ = Σ⁻¹QᵀÂQΣ⁻¹
+    # Ψ(x) K Ψ(x)ᵀ = Ψ(y)Ψ(x)ᵀ
+    # QΣZᵀ K ZΣQᵀ  = Â
+    # ΣZᵀ K ZΣ⁻¹   = QᵀÂQΣ⁻²
+    # Ã := ΣZᵀ K ZΣ⁻¹
+    # any eigen pair (λ, v̂) of Ã corresponds the eigen pair of (λ, ξ = ZΣ⁻¹v̂) of K
+    # Kop (ψ(x) ξ) = ψ(x)K ξ = λ ψ(x) ξ
+    # Therefore, (λ, ψ(x) ξ) is the eigen pair of Kop
+
+    # X' = Ψ(x)[ξ₁ ξ₂ ... ξₙ] V' = Q[v̂₁ v̂₂ ... v̂ₙ] V'
+    
 
     self._Â = Â
     self._Ĝ = Ĝ
     Q, S2, _ = svd(Ĝ, full=false)
+    # adjust n_rank 
+    n_rank = min(n_rank, searchsortedfirst(S2, self.r_ϵ*S2[1], rev=true)-1)
     Q = Q[:, 1:n_rank]
     S2 = S2[1:n_rank]
-    S = sqrt.(S2)
-    self._Ã = (Q'*Â*Q)/S2  #S\(Q'*Â*Q)/S
+    @info norm(Q), norm(S2)
+    
+
+    self._Ã = (Q'*Â*Q) ./ S2'  #S\(Q'*Â*Q)/S
+
+    @info "S2 = ", S2
+    # @info norm(Q'*Â*Q)
+    # @info norm(self._Ã)
+
+    # @info Q'*Â*Q
+    # @info self._Ã
+    # error("stop")
 
     # Eigensolve gives modes and eigenvalues
-    self._λ, self._w = eig(self._Ã)
+    self._λ, self._w = eigen(self._Ã)
+    
     # self._evals, vecs = np.linalg.eig(self._Ã)
-    self._PhiX = (U*self._w)'
+    self._PhiX = (Q*self._w)'
 
     # Two options: exact modes or projected modes
     if self.exact
-        PhiY = (Â*U/S2 * self._w)'
-        self._modes = Y*pinv(PhiY)
+        PhiY = (Â*Q ./ S2' * self._w)'
+        self._modes = Y/PhiY
     else
-        self._modes = X*pinv(self._PhiX)
+        self._modes = X/self._PhiX
     end
 end
 
@@ -466,12 +488,10 @@ struct PolyKernel
     We refer to the transformation from state space to feature space a f 
     in all that follows.
     """
-    α::Int
-    ϵ::FT
-
-function PolyKernel(α::Int, ϵ::FT=1.0)
-    return PolyKernel(α, ϵ)
+    α::Int64
+    ϵ::Float64  #default 1
 end
+
 
 function inner_product(self::PolyKernel, X, Y)
         """

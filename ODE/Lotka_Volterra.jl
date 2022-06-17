@@ -33,11 +33,39 @@ end
 f = Lotka_Volterra
 x0 = [2.0; 1.0]
 θ = [2.0/3.0  ; 4.0/3.0 ; 1.0  ; 1.0]
-Δt, N_t = 0.1, 1000
+Δt, N_t = 0.1, 10
 xs = compute_ODE_RK4(f, x0, θ, Δt, N_t)
 
-ts = Δt*Array(0:1000)
+ts = Δt*Array(0:N_t)
 
 plot(ts, xs[1, :], label="Prey")
 plot(ts, xs[2, :], label="Predator")
 legend()
+using NPZ
+npzwrite("LV.npy", xs)
+
+include("../Algorithms/DMD.jl")
+# dmd = DMD()
+# fit!(dmd, xs)
+# @info dmd._λ, dmd._basis, dmd._w, dmd._Ã
+
+
+# dmd = DMD(;n_rank=0, exact=true, total=false)
+# fit!(dmd, xs)
+# @info dmd._λ, dmd._basis, dmd._w, dmd._Ã
+
+kernel_fun = PolyKernel(2, 1.0)
+dmd = KDMD(kernel_fun; n_rank=6, exact=true, total=true)
+fit!(dmd, xs)
+
+
+@show   sum(dmd._modes)
+@show   sum(dmd._λ)
+@show   sum(dmd._PhiX)
+@show   sum(dmd._Ã)
+@show   sum(dmd._Ĝ)
+@show   sum(dmd._Â)
+
+@show   dmd._λ
+@show   dmd._modes
+
