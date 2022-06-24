@@ -114,9 +114,6 @@ end
 function evals(self::DMD)
     return self._λ
 end
-# function basis(self::DMD)
-#     return self._basis
-# end
 
 function Atilde(self::DMD)
     return self._Ã
@@ -322,10 +319,6 @@ function evals(self::KDMD)
     return self._λ
 end
 
-# function basis(self::KDMD)
-#     return self._basis
-# end
-
 function Atilde(self::KDMD)
     return self._Ã
 end
@@ -368,17 +361,12 @@ function fit!(self::KDMD, X, Y=nothing)
         Ĝ = Ĝfull[1:end-1, 1:end-1]
         Â = Ĝfull[2:end, 1:end-1]
 
-        @info size(X), size(Ĝfull)
-
         if self.total
             Ĝy = Ĝfull[2:end, 2:end]
         end
 
         Y = X[:, 2:end]
         X = X[:, 1:end-1]
-
-        @info "size(Â)", size(Â), norm(Â)
-        @info "size(Ĝ)", size(Ĝ), norm(Ĝ)
         
     else  
         # Paired data
@@ -443,19 +431,8 @@ function fit!(self::KDMD, X, Y=nothing)
     n_rank = min(n_rank, searchsortedfirst(S2, self.r_ϵ*S2[1], rev=true)-1)
     Q = Q[:, 1:n_rank]
     S2 = S2[1:n_rank]
-    @info norm(Q), norm(S2)
-    
-
     self._Ã = (Q'*Â*Q) ./ S2'  #S\(Q'*Â*Q)/S
-
-    @info "S2 = ", S2
-    # @info norm(Q'*Â*Q)
-    # @info norm(self._Ã)
-
-    # @info Q'*Â*Q
-    # @info self._Ã
-    # error("stop")
-
+    
     # Eigensolve gives modes and eigenvalues
     self._λ, self._w = eigen(self._Ã)
     
